@@ -38,10 +38,10 @@ function App() {
         const selected = await window.aistudio.hasSelectedApiKey();
         setHasApiKeySelected(selected);
       } else {
-        // Fallback or warning if aistudio API is not available
-        console.warn("window.aistudio or hasSelectedApiKey is not available. API key selection might not function correctly.");
-        // If aistudio is not available, assume API_KEY is set via environment for local dev/testing
-        setHasApiKeySelected(!!process.env.API_KEY); 
+        // If aistudio is not available, assume API_KEY is correctly set via environment
+        // for external deployments (like Vercel) as per guidelines, and proceed.
+        // The application must not ask the user for it under these circumstances.
+        setHasApiKeySelected(true); 
       }
     };
     checkApiKey();
@@ -86,7 +86,7 @@ function App() {
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!hasApiKeySelected) {
+    if (!hasApiKeySelected && window.aistudio) { // Only check if aistudio is available, otherwise assume key is set
       setError("Please select your Gemini API key first.");
       return;
     }
@@ -129,10 +129,13 @@ function App() {
       let errorMessage = e.message || "Failed to generate voice-over. Please try again.";
       if (errorMessage.includes("Authentication failed") || errorMessage.includes("Requested entity was not found.")) {
         errorMessage = `${errorMessage} Please ensure a valid API key is selected.`;
-        setHasApiKeySelected(false); // Reset API key state to prompt re-selection
+        // Only reset API key state to prompt re-selection if aistudio is available
+        if (window.aistudio) {
+          setHasApiKeySelected(false);
+        }
       } else if (errorMessage.includes("500 Internal Server Error") || errorMessage.includes("Rpc failed due to xhr error")) {
         // Generic 500 error handling
-        errorMessage = `A server error occurred. This might be a temporary issue. Please try again in a moment, check your internet connection, or try re-selecting your API key.`;
+        errorMessage = `A server error occurred. This might be a temporary issue. Please try again in a moment, check your internet connection, or try re-selecting your API key (if applicable).`;
       }
       setError(errorMessage);
     } finally {
@@ -192,7 +195,7 @@ function App() {
       </header>
 
       <main className="w-full max-w-3xl bg-white shadow-lg rounded-xl p-8 space-y-8 md:p-10">
-        {!hasApiKeySelected && (
+        {!hasApiKeySelected && window.aistudio && ( // Only show API key selection if aistudio is present and key is not selected
           <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4 mb-6 rounded-md" role="alert">
             <h3 className="font-bold text-lg mb-2">Gemini API Key Required</h3>
             <p className="text-sm">
@@ -229,9 +232,9 @@ function App() {
             onChange={(e) => setMovieName(e.target.value)}
             placeholder="e.g., Baahubali: The Beginning"
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base"
-            disabled={isLoading || !hasApiKeySelected}
+            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
             onKeyPress={(e) => {
-                if (e.key === 'Enter' && !isLoading && hasApiKeySelected) {
+                if (e.key === 'Enter' && !isLoading && (hasApiKeySelected || !window.aistudio)) { // Allow enter if key assumed set
                     handleGenerate();
                 }
             }}
@@ -245,7 +248,7 @@ function App() {
             value={selectedContentLanguage}
             onChange={(e) => setSelectedContentLanguage(e.target.value as ContentLanguage)}
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
-            disabled={isLoading || !hasApiKeySelected}
+            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
           >
             {contentLanguageOptions.map((lang) => (
               <option key={lang.value} value={lang.value}>
@@ -262,7 +265,7 @@ function App() {
             value={selectedVoice}
             onChange={(e) => setSelectedVoice(e.target.value)}
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
-            disabled={isLoading || !hasApiKeySelected}
+            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
           >
             {voiceOptions.map((voice) => (
               <option key={voice} value={voice}>
@@ -274,7 +277,7 @@ function App() {
           <button
             onClick={handleGenerate}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isLoading || !hasApiKeySelected}
+            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
           >
             {isLoading ? 'Generating...' : 'Generate Voice-over'}
           </button>
