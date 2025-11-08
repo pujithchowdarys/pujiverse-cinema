@@ -52,7 +52,21 @@ export const generateMovieVoiceover = async (
   voiceName: string = 'Zephyr',
   contentLanguage: 'english' | 'telugu-mix' | 'hindi-mix' = 'telugu-mix'
 ): Promise<GeneratedVoiceover> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Check for API key availability, specifically for non-AI Studio environments
+  const apiKey = (window as any).process?.env?.API_KEY; // Access via window.process for consistency with shim
+  if (!window.aistudio && !apiKey) {
+    throw new Error(
+      "API_KEY environment variable is not set or accessible in this client-side environment. " +
+      "For Vercel deployments, ensure 'API_KEY' is set in your project's Environment Variables. " +
+      "If using a client-side only app without a build step, Vercel may not automatically expose `process.env` " +
+      "to the browser. This application relies on `process.env.API_KEY` being available globally."
+    );
+  }
+
+  // If window.aistudio exists, it will manage its own key internally.
+  // We still pass process.env.API_KEY, assuming AI Studio's environment will correctly populate it
+  // or that it will be overridden by AI Studio's internal mechanisms.
+  const ai = new GoogleGenAI({ apiKey: apiKey });
 
   let systemInstruction: string;
   let prompt: string;

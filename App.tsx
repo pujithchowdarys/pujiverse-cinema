@@ -4,6 +4,23 @@ import { decode, decodeAudioData, encodeWAV } from './utils/audio';
 import Spinner from './components/Spinner';
 import { GeneratedVoiceover } from './types';
 
+// Define the AIStudio interface to avoid conflicts and improve type clarity
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    aistudio?: AIStudio;
+    process?: {
+      env: {
+        API_KEY?: string;
+      };
+    };
+  }
+}
+
 function App() {
   const [movieName, setMovieName] = useState<string>('');
   const [generatedContent, setGeneratedContent] = useState<GeneratedVoiceover | null>(null);
@@ -86,7 +103,8 @@ function App() {
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!hasApiKeySelected && window.aistudio) { // Only check if aistudio is available, otherwise assume key is set
+    // Only check `hasApiKeySelected` if `window.aistudio` is present, otherwise assume key is handled
+    if (!hasApiKeySelected && window.aistudio) { 
       setError("Please select your Gemini API key first.");
       return;
     }
@@ -136,6 +154,9 @@ function App() {
       } else if (errorMessage.includes("500 Internal Server Error") || errorMessage.includes("Rpc failed due to xhr error")) {
         // Generic 500 error handling
         errorMessage = `A server error occurred. This might be a temporary issue. Please try again in a moment, check your internet connection, or try re-selecting your API key (if applicable).`;
+      } else if (errorMessage.includes("API_KEY environment variable is not set or accessible")) {
+        // Specific error for external deployments without API key, do not prompt for selection
+        errorMessage = `${errorMessage} Please refer to Vercel's documentation on setting environment variables for client-side applications or consider using a server-side proxy.`;
       }
       setError(errorMessage);
     } finally {
@@ -232,7 +253,8 @@ function App() {
             onChange={(e) => setMovieName(e.target.value)}
             placeholder="e.g., Baahubali: The Beginning"
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base"
-            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
+            // Corrected disabled logic: disable if loading OR (if aistudio is present AND key is not selected)
+            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
             onKeyPress={(e) => {
                 if (e.key === 'Enter' && !isLoading && (hasApiKeySelected || !window.aistudio)) { // Allow enter if key assumed set
                     handleGenerate();
@@ -248,7 +270,8 @@ function App() {
             value={selectedContentLanguage}
             onChange={(e) => setSelectedContentLanguage(e.target.value as ContentLanguage)}
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
-            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
+            // Corrected disabled logic
+            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
           >
             {contentLanguageOptions.map((lang) => (
               <option key={lang.value} value={lang.value}>
@@ -265,7 +288,8 @@ function App() {
             value={selectedVoice}
             onChange={(e) => setSelectedVoice(e.target.value)}
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
-            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
+            // Corrected disabled logic
+            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
           >
             {voiceOptions.map((voice) => (
               <option key={voice} value={voice}>
@@ -277,7 +301,8 @@ function App() {
           <button
             onClick={handleGenerate}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isLoading || (!hasApiKeySelected && window.aistudio)} // Disable if loading OR (not selected AND in aistudio)
+            // Corrected disabled logic
+            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
           >
             {isLoading ? 'Generating...' : 'Generate Voice-over'}
           </button>
