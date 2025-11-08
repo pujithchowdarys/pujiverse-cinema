@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { generateMovieVoiceover } from './services/geminiService';
 import { decode, decodeAudioData, encodeWAV } from './utils/audio';
@@ -10,16 +11,8 @@ interface AIStudio {
   openSelectKey: () => Promise<void>;
 }
 
-declare global {
-  interface Window {
-    aistudio?: AIStudio;
-    process?: {
-      env: {
-        API_KEY?: string;
-      };
-    };
-  }
-}
+// The declare global block is removed as it causes a "Subsequent property declarations" error,
+// implying that window.aistudio's types are already globally available from the execution environment.
 
 function App() {
   const [movieName, setMovieName] = useState<string>('');
@@ -51,8 +44,10 @@ function App() {
 
     const checkApiKey = async () => {
       // Check if window.aistudio and its functions exist before calling
-      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-        const selected = await window.aistudio.hasSelectedApiKey();
+      // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
+      const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
+      if (aistudioInstance && typeof aistudioInstance.hasSelectedApiKey === 'function') {
+        const selected = await aistudioInstance.hasSelectedApiKey();
         setHasApiKeySelected(selected);
       } else {
         // If aistudio is not available, assume API_KEY is correctly set via environment
@@ -79,8 +74,10 @@ function App() {
 
   const handleSelectApiKey = useCallback(async () => {
     try {
-      if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-        await window.aistudio.openSelectKey();
+      // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
+      const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
+      if (aistudioInstance && typeof aistudioInstance.openSelectKey === 'function') {
+        await aistudioInstance.openSelectKey();
         // Assuming selection was successful after dialog closes
         setHasApiKeySelected(true);
         setError(null); // Clear any previous API key related errors
@@ -103,8 +100,11 @@ function App() {
   }, []);
 
   const handleGenerate = useCallback(async () => {
+    // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
+    const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
+
     // Only check `hasApiKeySelected` if `window.aistudio` is present, otherwise assume key is handled
-    if (!hasApiKeySelected && window.aistudio) { 
+    if (!hasApiKeySelected && aistudioInstance) { 
       setError("Please select your Gemini API key first.");
       return;
     }
@@ -148,15 +148,12 @@ function App() {
       if (errorMessage.includes("Authentication failed") || errorMessage.includes("Requested entity was not found.")) {
         errorMessage = `${errorMessage} Please ensure a valid API key is selected.`;
         // Only reset API key state to prompt re-selection if aistudio is available
-        if (window.aistudio) {
+        if (aistudioInstance) {
           setHasApiKeySelected(false);
         }
       } else if (errorMessage.includes("500 Internal Server Error") || errorMessage.includes("Rpc failed due to xhr error")) {
         // Generic 500 error handling
         errorMessage = `A server error occurred. This might be a temporary issue. Please try again in a moment, check your internet connection, or try re-selecting your API key (if applicable).`;
-      } else if (errorMessage.includes("API_KEY environment variable is not set or accessible")) {
-        // Specific error for external deployments without API key, do not prompt for selection
-        errorMessage = `${errorMessage} Please refer to Vercel's documentation on setting environment variables for client-side applications or consider using a server-side proxy.`;
       }
       setError(errorMessage);
     } finally {
@@ -204,6 +201,9 @@ function App() {
     }
   }, [thumbnailBlobUrl, movieName]);
 
+  // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
+  const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
+
   return (
     <div className="min-h-screen flex flex-col items-center p-4 bg-gray-50 text-gray-900">
       <header className="w-full max-w-4xl text-center py-8">
@@ -216,7 +216,7 @@ function App() {
       </header>
 
       <main className="w-full max-w-3xl bg-white shadow-lg rounded-xl p-8 space-y-8 md:p-10">
-        {!hasApiKeySelected && window.aistudio && ( // Only show API key selection if aistudio is present and key is not selected
+        {!hasApiKeySelected && aistudioInstance && ( // Only show API key selection if aistudio is present and key is not selected
           <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4 mb-6 rounded-md" role="alert">
             <h3 className="font-bold text-lg mb-2">Gemini API Key Required</h3>
             <p className="text-sm">
@@ -254,9 +254,9 @@ function App() {
             placeholder="e.g., Baahubali: The Beginning"
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base"
             // Corrected disabled logic: disable if loading OR (if aistudio is present AND key is not selected)
-            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
+            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
             onKeyPress={(e) => {
-                if (e.key === 'Enter' && !isLoading && (hasApiKeySelected || !window.aistudio)) { // Allow enter if key assumed set
+                if (e.key === 'Enter' && !isLoading && (hasApiKeySelected || !aistudioInstance)) { // Allow enter if key assumed set
                     handleGenerate();
                 }
             }}
@@ -271,7 +271,7 @@ function App() {
             onChange={(e) => setSelectedContentLanguage(e.target.value as ContentLanguage)}
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
             // Corrected disabled logic
-            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
+            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
           >
             {contentLanguageOptions.map((lang) => (
               <option key={lang.value} value={lang.value}>
@@ -289,7 +289,7 @@ function App() {
             onChange={(e) => setSelectedVoice(e.target.value)}
             className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
             // Corrected disabled logic
-            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
+            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
           >
             {voiceOptions.map((voice) => (
               <option key={voice} value={voice}>
@@ -302,7 +302,7 @@ function App() {
             onClick={handleGenerate}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
             // Corrected disabled logic
-            disabled={isLoading || (window.aistudio && !hasApiKeySelected)}
+            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
           >
             {isLoading ? 'Generating...' : 'Generate Voice-over'}
           </button>
