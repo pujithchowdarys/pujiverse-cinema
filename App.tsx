@@ -5,23 +5,16 @@ import { decode, decodeAudioData, encodeWAV } from './utils/audio';
 import Spinner from './components/Spinner';
 import { GeneratedVoiceover } from './types';
 
-// Define the AIStudio interface to avoid conflicts and improve type clarity
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
-
-// The declare global block is removed as it causes a "Subsequent property declarations" error,
-// implying that window.aistudio's types are already globally available from the execution environment.
-
 function App() {
   const [movieName, setMovieName] = useState<string>('');
   const [generatedContent, setGeneratedContent] = useState<GeneratedVoiceover | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasApiKeySelected, setHasApiKeySelected] = useState<boolean>(false);
+  const [apiKey, setApiKey] = useState<string>('');
+  const [tempApiKey, setTempApiKey] = useState<string>('');
+  const [isKeySaved, setIsKeySaved] = useState<boolean>(false);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
-  const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null); // New state for thumbnail blob URL
+  const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
 
   const voiceOptions = ['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir'];
   const [selectedVoice, setSelectedVoice] = useState<string>(voiceOptions[0]);
@@ -34,29 +27,18 @@ function App() {
   ];
   const [selectedContentLanguage, setSelectedContentLanguage] = useState<ContentLanguage>('telugu-mix');
 
-  const audioContextRef = useRef<AudioContext | null>(null); // Still needed for WAV encoding/decoding
+  const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Initialize AudioContext and check API key on mount
   useEffect(() => {
+    const savedApiKey = localStorage.getItem('gemini-api-key');
+    if (savedApiKey) {
+      setApiKey(savedApiKey);
+      setIsKeySaved(true);
+    }
+    
     if (!audioContextRef.current) {
       audioContextRef.current = new AudioContext({ sampleRate: 24000 });
     }
-
-    const checkApiKey = async () => {
-      // Check if window.aistudio and its functions exist before calling
-      // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
-      const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
-      if (aistudioInstance && typeof aistudioInstance.hasSelectedApiKey === 'function') {
-        const selected = await aistudioInstance.hasSelectedApiKey();
-        setHasApiKeySelected(selected);
-      } else {
-        // If aistudio is not available, assume API_KEY is correctly set via environment
-        // for external deployments (like Vercel) as per guidelines, and proceed.
-        // The application must not ask the user for it under these circumstances.
-        setHasApiKeySelected(true); 
-      }
-    };
-    checkApiKey();
 
     return () => {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
@@ -66,33 +48,33 @@ function App() {
       if (audioBlobUrl) {
         URL.revokeObjectURL(audioBlobUrl);
       }
-      if (thumbnailBlobUrl) { // Cleanup thumbnail blob URL
+      if (thumbnailBlobUrl) {
         URL.revokeObjectURL(thumbnailBlobUrl);
       }
     };
-  }, [audioBlobUrl, thumbnailBlobUrl]); // Include thumbnailBlobUrl in dependency array
+  }, [audioBlobUrl, thumbnailBlobUrl]);
 
-  const handleSelectApiKey = useCallback(async () => {
-    try {
-      // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
-      const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
-      if (aistudioInstance && typeof aistudioInstance.openSelectKey === 'function') {
-        await aistudioInstance.openSelectKey();
-        // Assuming selection was successful after dialog closes
-        setHasApiKeySelected(true);
-        setError(null); // Clear any previous API key related errors
-      } else {
-        setError("API key selection utility is not available.");
-      }
-    } catch (e: any) {
-      console.error("Error opening API key selection:", e);
-      setError(`Failed to open API key selection: ${e.message || 'Unknown error'}`);
+  const handleSaveKey = () => {
+    if (tempApiKey.trim()) {
+      localStorage.setItem('gemini-api-key', tempApiKey.trim());
+      setApiKey(tempApiKey.trim());
+      setIsKeySaved(true);
+      setError(null);
+    } else {
+      setError("Please enter a valid API key.");
     }
-  }, []);
+  };
+  
+  const handleForgetApiKey = () => {
+    localStorage.removeItem('gemini-api-key');
+    setApiKey('');
+    setTempApiKey('');
+    setIsKeySaved(false);
+  };
 
   const copyToClipboard = useCallback((text: string, fieldName: string) => {
     navigator.clipboard.writeText(text).then(() => {
-        alert(`${fieldName} copied to clipboard!`); // Simple alert for confirmation
+        alert(`${fieldName} copied to clipboard!`);
     }).catch(err => {
         console.error(`Failed to copy ${fieldName} to clipboard: `, err);
         alert(`Failed to copy ${fieldName}. Please try again.`);
@@ -100,12 +82,8 @@ function App() {
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
-    const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
-
-    // Only check `hasApiKeySelected` if `window.aistudio` is present, otherwise assume key is handled
-    if (!hasApiKeySelected && aistudioInstance) { 
-      setError("Please select your Gemini API key first.");
+    if (!isKeySaved) {
+      setError("Please save your Gemini API key first.");
       return;
     }
     if (!movieName.trim()) {
@@ -115,7 +93,7 @@ function App() {
     setIsLoading(true);
     setError(null);
     setGeneratedContent(null);
-    // Clear previous blob URLs
+
     if (audioBlobUrl) {
       URL.revokeObjectURL(audioBlobUrl);
       setAudioBlobUrl(null);
@@ -126,7 +104,7 @@ function App() {
     }
 
     try {
-      const result = await generateMovieVoiceover(movieName, selectedVoice, selectedContentLanguage);
+      const result = await generateMovieVoiceover(apiKey, movieName, selectedVoice, selectedContentLanguage);
       setGeneratedContent(result);
 
       if (result.audioBase64 && audioContextRef.current) {
@@ -139,27 +117,21 @@ function App() {
 
       if (result.thumbnailBase64) {
         const imageUrl = `data:image/jpeg;base64,${result.thumbnailBase64}`;
-        setThumbnailBlobUrl(imageUrl); // Store data URL directly for thumbnail
+        setThumbnailBlobUrl(imageUrl);
       }
 
     } catch (e: any) {
       console.error("Generation failed:", e);
       let errorMessage = e.message || "Failed to generate voice-over. Please try again.";
-      if (errorMessage.includes("Authentication failed") || errorMessage.includes("Requested entity was not found.")) {
-        errorMessage = `${errorMessage} Please ensure a valid API key is selected.`;
-        // Only reset API key state to prompt re-selection if aistudio is available
-        if (aistudioInstance) {
-          setHasApiKeySelected(false);
-        }
-      } else if (errorMessage.includes("500 Internal Server Error") || errorMessage.includes("Rpc failed due to xhr error")) {
-        // Generic 500 error handling
-        errorMessage = `A server error occurred. This might be a temporary issue. Please try again in a moment, check your internet connection, or try re-selecting your API key (if applicable).`;
+      if (errorMessage.includes("Authentication failed")) {
+        errorMessage = `${errorMessage}. You can enter a new key.`;
+        handleForgetApiKey();
       }
       setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
-  }, [movieName, hasApiKeySelected, audioBlobUrl, thumbnailBlobUrl, selectedVoice, selectedContentLanguage]);
+  }, [apiKey, movieName, isKeySaved, audioBlobUrl, thumbnailBlobUrl, selectedVoice, selectedContentLanguage]);
 
   const handleDownloadScript = useCallback(() => {
     if (generatedContent?.script) {
@@ -201,9 +173,6 @@ function App() {
     }
   }, [thumbnailBlobUrl, movieName]);
 
-  // Explicitly cast window.aistudio to AIStudio to ensure type safety after removing declare global
-  const aistudioInstance: AIStudio | undefined = (window as any).aistudio;
-
   return (
     <div className="min-h-screen flex flex-col items-center p-4 bg-gray-50 text-gray-900">
       <header className="w-full max-w-4xl text-center py-8">
@@ -214,267 +183,294 @@ function App() {
           Your personalized movie voice-over generator (Telugu & English mix)
         </p>
       </header>
-
-      <main className="w-full max-w-3xl bg-white shadow-lg rounded-xl p-8 space-y-8 md:p-10">
-        {!hasApiKeySelected && aistudioInstance && ( // Only show API key selection if aistudio is present and key is not selected
-          <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4 mb-6 rounded-md" role="alert">
-            <h3 className="font-bold text-lg mb-2">Gemini API Key Required</h3>
-            <p className="text-sm">
-              To use this application, you need to select your Gemini API Key.
-              Please click the button below to open the selection dialog.
+      
+      {!isKeySaved ? (
+        <main className="w-full max-w-xl bg-white shadow-lg rounded-xl p-8 space-y-6 md:p-10">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-gray-800">Enter Your Google Gemini API Key</h2>
+            <p className="mt-2 text-gray-600">
+              To use this application, please provide your Google Gemini API key. This helps you manage your own usage and associated billing.
             </p>
-            <p className="text-sm mt-2">
+            <p className="mt-2 text-sm text-gray-500">
+              Don't have an API key? You can create one for free at{' '}
               <a 
-                href="https://ai.google.dev/gemini-api/docs/billing" 
+                href="https://aistudio.google.com/app/apikey" 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="text-yellow-700 hover:text-yellow-900 underline"
+                className="text-indigo-600 hover:underline"
               >
-                Learn more about Gemini API billing.
-              </a>
+                Google AI Studio
+              </a>. Just click "Create API key in new project" to get started.
             </p>
+          </div>
+          <div className="flex flex-col space-y-4">
+            <label htmlFor="apiKeyInput" className="sr-only">API Key</label>
+            <input
+              id="apiKeyInput"
+              type="password"
+              value={tempApiKey}
+              onChange={(e) => setTempApiKey(e.target.value)}
+              placeholder="Paste your API key here (e.g., AIzaSy...)"
+              className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleSaveKey();
+                }
+              }}
+            />
             <button
-              onClick={handleSelectApiKey}
-              className="mt-4 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50"
+              onClick={handleSaveKey}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
             >
-              Select Gemini API Key
+              Save Key and Start Creating
+            </button>
+            {error && (
+              <p className="text-red-600 text-sm text-center">{error}</p>
+            )}
+          </div>
+        </main>
+      ) : (
+        <main className="w-full max-w-3xl bg-white shadow-lg rounded-xl p-8 space-y-8 md:p-10">
+          <div className="flex justify-between items-center">
+             <p className="text-sm text-green-700 bg-green-100 px-3 py-1 rounded-full">API Key Saved</p>
+             <button
+               onClick={handleForgetApiKey}
+               className="text-sm text-gray-500 hover:text-gray-700 hover:underline"
+             >
+               Change API Key
+             </button>
+           </div>
+           
+          <div className="flex flex-col space-y-4">
+            <label htmlFor="movieNameInput" className="text-lg font-semibold text-gray-800">
+              Enter Movie Name:
+            </label>
+            <input
+              id="movieNameInput"
+              type="text"
+              value={movieName}
+              onChange={(e) => setMovieName(e.target.value)}
+              placeholder="e.g., Baahubali: The Beginning"
+              className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base"
+              disabled={isLoading}
+              onKeyPress={(e) => {
+                  if (e.key === 'Enter' && !isLoading) {
+                      handleGenerate();
+                  }
+              }}
+            />
+
+            <label htmlFor="contentLanguageSelect" className="text-lg font-semibold text-gray-800">
+              Select Content Language:
+            </label>
+            <select
+              id="contentLanguageSelect"
+              value={selectedContentLanguage}
+              onChange={(e) => setSelectedContentLanguage(e.target.value as ContentLanguage)}
+              className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
+              disabled={isLoading}
+            >
+              {contentLanguageOptions.map((lang) => (
+                <option key={lang.value} value={lang.value}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+
+            <label htmlFor="voiceSelect" className="text-lg font-semibold text-gray-800">
+              Select Voice for Voice-over:
+            </label>
+            <select
+              id="voiceSelect"
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
+              disabled={isLoading}
+            >
+              {voiceOptions.map((voice) => (
+                <option key={voice} value={voice}>
+                  {voice}
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={handleGenerate}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Generating...' : 'Generate Voice-over'}
             </button>
           </div>
-        )}
 
-        <div className="flex flex-col space-y-4">
-          <label htmlFor="movieNameInput" className="text-lg font-semibold text-gray-800">
-            Enter Movie Name:
-          </label>
-          <input
-            id="movieNameInput"
-            type="text"
-            value={movieName}
-            onChange={(e) => setMovieName(e.target.value)}
-            placeholder="e.g., Baahubali: The Beginning"
-            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base"
-            // Corrected disabled logic: disable if loading OR (if aistudio is present AND key is not selected)
-            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
-            onKeyPress={(e) => {
-                if (e.key === 'Enter' && !isLoading && (hasApiKeySelected || !aistudioInstance)) { // Allow enter if key assumed set
-                    handleGenerate();
-                }
-            }}
-          />
-
-          <label htmlFor="contentLanguageSelect" className="text-lg font-semibold text-gray-800">
-            Select Content Language:
-          </label>
-          <select
-            id="contentLanguageSelect"
-            value={selectedContentLanguage}
-            onChange={(e) => setSelectedContentLanguage(e.target.value as ContentLanguage)}
-            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
-            // Corrected disabled logic
-            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
-          >
-            {contentLanguageOptions.map((lang) => (
-              <option key={lang.value} value={lang.value}>
-                {lang.label}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="voiceSelect" className="text-lg font-semibold text-gray-800">
-            Select Voice for Voice-over:
-          </label>
-          <select
-            id="voiceSelect"
-            value={selectedVoice}
-            onChange={(e) => setSelectedVoice(e.target.value)}
-            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-base bg-white"
-            // Corrected disabled logic
-            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
-          >
-            {voiceOptions.map((voice) => (
-              <option key={voice} value={voice}>
-                {voice}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={handleGenerate}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            // Corrected disabled logic
-            disabled={isLoading || (aistudioInstance && !hasApiKeySelected)}
-          >
-            {isLoading ? 'Generating...' : 'Generate Voice-over'}
-          </button>
-        </div>
-
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md relative text-center">
-            <strong className="font-bold">Error!</strong>
-            <span className="block sm:inline ml-2">{error}</span>
-          </div>
-        )}
-
-        {isLoading && <Spinner />}
-
-        {generatedContent && (
-          <div className="space-y-6">
-            <h2 className="text-3xl font-bold text-indigo-700 text-center">Generated Content</h2>
-
-            {/* Script Display */}
-            <div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-4">Script:</h3>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 leading-relaxed text-gray-800 whitespace-pre-wrap shadow-inner text-lg">
-                {generatedContent.script}
-              </div>
-              <button
-                onClick={handleDownloadScript}
-                className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-              >
-                Download Script (TXT)
-              </button>
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md relative text-center">
+              <strong className="font-bold">Error!</strong>
+              <span className="block sm:inline ml-2">{error}</span>
             </div>
+          )}
 
-            {/* Audio Player */}
-            {audioBlobUrl && (
-              <div className="flex flex-col items-center gap-4">
-                <p className="text-lg font-medium text-gray-700">Listen to the voice-over:</p>
-                <audio controls src={audioBlobUrl} className="w-full max-w-md bg-gray-100 rounded-lg shadow-md p-2">
-                  Your browser does not support the audio element.
-                </audio>
-                <button
-                  onClick={handleDownloadAudio}
-                  className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
-                >
-                  Download Voice-over (WAV)
-                </button>
-              </div>
-            )}
+          {isLoading && <Spinner />}
 
-            {/* Generated Thumbnail */}
-            {thumbnailBlobUrl && (
-              <div className="flex flex-col items-center gap-4">
-                <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-3">Generated Thumbnail:</h3>
-                <img
-                  src={thumbnailBlobUrl}
-                  alt={`${movieName} thumbnail`}
-                  className="w-full max-w-lg rounded-lg shadow-md border border-gray-200"
-                  style={{ aspectRatio: '16 / 9', objectFit: 'cover' }}
-                />
-                <button
-                  onClick={handleDownloadThumbnail}
-                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50"
-                >
-                  Download Thumbnail (JPEG)
-                </button>
-              </div>
-            )}
-
-            {/* Grounding URLs */}
-            {generatedContent.groundingUrls.length > 0 && (
-              <div>
-                <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-3">Sources:</h3>
-                <ul className="list-disc list-inside space-y-1 text-gray-700 text-lg">
-                  {generatedContent.groundingUrls.map((url, index) => (
-                    <li key={index}>
-                      <a 
-                        href={url} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="text-indigo-600 hover:text-indigo-800 hover:underline transition duration-200 ease-in-out"
-                      >
-                        {url}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* YouTube Content Ideas */}
+          {generatedContent && (
             <div className="space-y-6">
-              <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-3">YouTube Content Ideas:</h3>
+              <h2 className="text-3xl font-bold text-indigo-700 text-center">Generated Content</h2>
 
-              {/* Title Ideas */}
+              {/* Script Display */}
               <div>
-                <h4 className="text-xl font-bold text-gray-700 mb-2">Title Options (Catchy & SEO-Friendly):</h4>
-                <ul className="list-disc list-inside space-y-2 text-gray-800 text-lg">
-                  {generatedContent.youtubeTitleIdeas.map((title, index) => (
-                    <li key={index} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3">
-                      <span className="flex-1 mr-4">{title}</span>
-                      <button
-                        onClick={() => copyToClipboard(title, `YouTube Title ${index + 1}`)}
-                        className="bg-indigo-500 hover:bg-indigo-600 text-white font-medium py-1 px-3 rounded-md text-sm transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
-                        title="Copy to clipboard"
-                      >
-                        Copy
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <h3 className="text-2xl font-bold text-gray-800 mb-4">Script:</h3>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 leading-relaxed text-gray-800 whitespace-pre-wrap shadow-inner text-lg">
+                  {generatedContent.script}
+                </div>
+                <button
+                  onClick={handleDownloadScript}
+                  className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                >
+                  Download Script (TXT)
+                </button>
               </div>
 
-              {/* Description Template */}
-              <div>
-                <h4 className="text-xl font-bold text-gray-700 mb-2">Description Template (Optimized for 1000+ characters):</h4>
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
-                  <textarea
-                    readOnly
-                    value={generatedContent.youtubeDescriptionTemplate}
-                    className="w-full bg-gray-50 text-gray-800 font-mono text-sm p-2 rounded-md outline-none resize-y min-h-[200px]"
-                    aria-label="YouTube Description Template"
-                  />
+              {/* Audio Player */}
+              {audioBlobUrl && (
+                <div className="flex flex-col items-center gap-4">
+                  <p className="text-lg font-medium text-gray-700">Listen to the voice-over:</p>
+                  <audio controls src={audioBlobUrl} className="w-full max-w-md bg-gray-100 rounded-lg shadow-md p-2">
+                    Your browser does not support the audio element.
+                  </audio>
                   <button
-                    onClick={() => copyToClipboard(generatedContent.youtubeDescriptionTemplate, 'YouTube Description')}
-                    className="mt-3 w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
+                    onClick={handleDownloadAudio}
+                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
                   >
-                    Copy Description
+                    Download Voice-over (WAV)
                   </button>
                 </div>
-              </div>
+              )}
 
-              {/* Hashtags */}
-              <div>
-                <h4 className="text-xl font-bold text-gray-700 mb-2">Hashtags:</h4>
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
-                  <textarea
-                    readOnly
-                    value={generatedContent.youtubeHashtags.join(' ')}
-                    className="w-full bg-gray-50 text-gray-800 font-mono text-sm p-2 rounded-md outline-none resize-y min-h-[80px]"
-                    aria-label="YouTube Hashtags"
+              {/* Generated Thumbnail */}
+              {thumbnailBlobUrl && (
+                <div className="flex flex-col items-center gap-4">
+                  <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-3">Generated Thumbnail:</h3>
+                  <img
+                    src={thumbnailBlobUrl}
+                    alt={`${movieName} thumbnail`}
+                    className="w-full max-w-lg rounded-lg shadow-md border border-gray-200"
+                    style={{ aspectRatio: '16 / 9', objectFit: 'cover' }}
                   />
                   <button
-                    onClick={() => copyToClipboard(generatedContent.youtubeHashtags.join(' '), 'YouTube Hashtags')}
-                    className="mt-3 w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
+                    onClick={handleDownloadThumbnail}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50"
                   >
-                    Copy Hashtags
+                    Download Thumbnail (JPEG)
                   </button>
                 </div>
-              </div>
+              )}
 
-              {/* Tags */}
-              <div>
-                <h4 className="text-xl font-bold text-gray-700 mb-2">Tags:</h4>
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
-                  <textarea
-                    readOnly
-                    value={generatedContent.youtubeTags.join(', ')}
-                    className="w-full bg-gray-50 text-gray-800 font-mono text-sm p-2 rounded-md outline-none resize-y min-h-[80px]"
-                    aria-label="YouTube Tags"
-                  />
-                  <button
-                    onClick={() => copyToClipboard(generatedContent.youtubeTags.join(', '), 'YouTube Tags')}
-                    className="mt-3 w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
-                  >
-                    Copy Tags
-                  </button>
+              {/* Grounding URLs */}
+              {generatedContent.groundingUrls.length > 0 && (
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-3">Sources:</h3>
+                  <ul className="list-disc list-inside space-y-1 text-gray-700 text-lg">
+                    {generatedContent.groundingUrls.map((url, index) => (
+                      <li key={index}>
+                        <a 
+                          href={url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="text-indigo-600 hover:text-indigo-800 hover:underline transition duration-200 ease-in-out"
+                        >
+                          {url}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              </div>
+              )}
 
+              {/* YouTube Content Ideas */}
+              <div className="space-y-6">
+                <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-3">YouTube Content Ideas:</h3>
+
+                {/* Title Ideas */}
+                <div>
+                  <h4 className="text-xl font-bold text-gray-700 mb-2">Title Options (Catchy & SEO-Friendly):</h4>
+                  <ul className="list-disc list-inside space-y-2 text-gray-800 text-lg">
+                    {generatedContent.youtubeTitleIdeas.map((title, index) => (
+                      <li key={index} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3">
+                        <span className="flex-1 mr-4">{title}</span>
+                        <button
+                          onClick={() => copyToClipboard(title, `YouTube Title ${index + 1}`)}
+                          className="bg-indigo-500 hover:bg-indigo-600 text-white font-medium py-1 px-3 rounded-md text-sm transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
+                          title="Copy to clipboard"
+                        >
+                          Copy
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Description Template */}
+                <div>
+                  <h4 className="text-xl font-bold text-gray-700 mb-2">Description Template (Optimized for 1000+ characters):</h4>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
+                    <textarea
+                      readOnly
+                      value={generatedContent.youtubeDescriptionTemplate}
+                      className="w-full bg-gray-50 text-gray-800 font-mono text-sm p-2 rounded-md outline-none resize-y min-h-[200px]"
+                      aria-label="YouTube Description Template"
+                    />
+                    <button
+                      onClick={() => copyToClipboard(generatedContent.youtubeDescriptionTemplate, 'YouTube Description')}
+                      className="mt-3 w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
+                    >
+                      Copy Description
+                    </button>
+                  </div>
+                </div>
+
+                {/* Hashtags */}
+                <div>
+                  <h4 className="text-xl font-bold text-gray-700 mb-2">Hashtags:</h4>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
+                    <textarea
+                      readOnly
+                      value={generatedContent.youtubeHashtags.join(' ')}
+                      className="w-full bg-gray-50 text-gray-800 font-mono text-sm p-2 rounded-md outline-none resize-y min-h-[80px]"
+                      aria-label="YouTube Hashtags"
+                    />
+                    <button
+                      onClick={() => copyToClipboard(generatedContent.youtubeHashtags.join(' '), 'YouTube Hashtags')}
+                      className="mt-3 w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
+                    >
+                      Copy Hashtags
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <h4 className="text-xl font-bold text-gray-700 mb-2">Tags:</h4>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner">
+                    <textarea
+                      readOnly
+                      value={generatedContent.youtubeTags.join(', ')}
+                      className="w-full bg-gray-50 text-gray-800 font-mono text-sm p-2 rounded-md outline-none resize-y min-h-[80px]"
+                      aria-label="YouTube Tags"
+                    />
+                    <button
+                      onClick={() => copyToClipboard(generatedContent.youtubeTags.join(', '), 'YouTube Tags')}
+                      className="mt-3 w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
+                    >
+                      Copy Tags
+                    </button>
+                  </div>
+                </div>
+
+              </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+      )}
 
       <footer className="w-full max-w-4xl text-center py-8 mt-12 text-gray-500 text-sm">
         <p>&copy; {new Date().getFullYear()} Pujiverse Cinema. All rights reserved.</p>

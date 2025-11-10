@@ -1,7 +1,5 @@
 {
   "name": "Pujiverse Cinema Storyteller",
   "description": "Generate movie voice-overs and scripts in a mix of Telugu and English, complete with details and story explanation. Download the script and audio.",
-  "requestFramePermissions": [
-    "geolocation"
-  ]
+  "requestFramePermissions": []
 }
